@@ -1,0 +1,29 @@
+[0m[[0m[0mdebug[0m] [0m[0mCreated transactional ClassFileManager with tempDir = /Users/rohaga/Documents/Research/RandomAPI/target/scala-3.2.0/classes.bak[0m
+[0m[[0m[0mdebug[0m] [0m[0mAbout to delete class files:[0m
+[0m[[0m[0mdebug[0m] [0m[0m	ScalaRandom.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$Gen$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	ScalaRandom.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$Gen$.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0mWe backup class files:[0m
+[0m[[0m[0mdebug[0m] [0m[0m	ScalaRandom.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$Gen$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	ScalaRandom.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$Gen$.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0mRegistering generated classes:[0m
+[0m[[0m[0mdebug[0m] [0m[0m	ScalaRandom.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$Gen$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$.class[0m
+[0m[[0m[0mdebug[0m] [0m[0m	ScalaRandom.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$Gen$.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0m	Gen$package$.tasty[0m
+[0m[[0m[0mdebug[0m] [0m[0mRemoving the temporary directory used for backing up class files: /Users/rohaga/Documents/Research/RandomAPI/target/scala-3.2.0/classes.bak[0m

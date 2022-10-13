@@ -1,0 +1,4 @@
+[debug] [randomapi-test] Classpath dependencies List()
+[debug] [randomapi-test] Dependencies from configurations List(randomapi)
+[debug] Bloop wrote the configuration of project 'randomapi-test' to '/Users/rohaga/Documents/Research/RandomAPI/.bloop/randomapi-test.json'
+[success] Generated .bloop/randomapi-test.json

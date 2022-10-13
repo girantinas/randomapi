@@ -1,0 +1,9 @@
+[0m[[0m[31merror[0m] [0m[0m[31m[31m-- [E008] Not Found Error: /Users/rohaga/Documents/Research/RandomAPI/src/main/scala/Gen.scala:81:16 [0m[0m[0m
+[0m[[0m[31merror[0m] [0m[0m[31m81 |[0m    println(rng.parameter)[0m
+[0m[[0m[31merror[0m] [0m[0m[31m[31m   |[0m            ^^^^^^^^^^^^^[0m[0m
+[0m[[0m[31merror[0m] [0m[0m[31m   |[0m            value parameter is not a member of randomapi.RNG[0m
+[0m[[0m[31merror[0m] [0m[0m[31m[31m-- [E008] Not Found Error: /Users/rohaga/Documents/Research/RandomAPI/src/main/scala/Gen.scala:82:16 [0m[0m[0m
+[0m[[0m[31merror[0m] [0m[0m[31m82 |[0m    println(rng.idx)[0m
+[0m[[0m[31merror[0m] [0m[0m[31m[31m   |[0m            ^^^^^^^[0m[0m
+[0m[[0m[31merror[0m] [0m[0m[31m   |[0m            value idx is not a member of randomapi.RNG[0m
+[0m[[0m[31merror[0m] [0m[0mtwo errors found[0m
