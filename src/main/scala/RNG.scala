@@ -6,7 +6,7 @@ trait RNG:
   /* Uniform between (Int.MinValue, Int.MaxValue) */
   def nextInt(): (Int, RNG)
   /* Uniform between [0.0, 1.0] */
-  def nextFloat(): (Float, RNG)
+  def nextDouble(): (Double, RNG)
   def nextBool(): (Boolean, RNG)
   def nextBytes(n: Int): (Vector[Byte], RNG)
   /* Reset the RNG to create another set of outputs.

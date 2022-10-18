@@ -21,9 +21,9 @@ class ParametricRandom(val parameter: Vector[Byte], val rng: RNG, val idx: Int =
     val rangeCorrected = newInt % n
     val signCorrected = if rangeCorrected >= 0 then rangeCorrected else rangeCorrected + n
     (signCorrected, newRng)  
-  def nextFloat(): (Float, RNG) = 
+  def nextDouble(): (Double, RNG) = 
     val (newInt, newRng) = this.nextInt(Int.MaxValue)
-    (math.abs(newInt.toFloat / Int.MaxValue), newRng)
+    (newInt.toFloat / (Int.MaxValue + 1), newRng)
   def nextBool(): (Boolean, RNG) = 
     val (newParam, newRng) = if idx + SizeOfBool > parameter.size then 
       val (newBytes, newRng) = rng.nextBytes(idx - parameter.size + SizeOfBool)
