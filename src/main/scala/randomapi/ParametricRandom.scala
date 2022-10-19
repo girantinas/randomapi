@@ -1,12 +1,14 @@
 package randomapi
+
 import ParametricRandom.*
+import scala.annotation.tailrec
 
 /* Functional Parametric Random class. */
 class ParametricRandom(val parameter: Vector[Byte], val rng: RNG, val idx: Int = 0) extends RNG:
-  // Design decision: increment by 1 or double size?
   def nextInt(): (Int, RNG) = 
     val (newParam, newRng) = if idx + SizeOfInt > parameter.size then 
-      val (newBytes, newRng) = rng.nextBytes(idx - parameter.size + SizeOfInt)
+      // Double parameter size for amortization
+      val (newBytes, newRng) = rng.nextBytes(parameter.size)
       (parameter ++ newBytes, newRng)
     else (parameter, rng)
 
@@ -15,14 +17,18 @@ class ParametricRandom(val parameter: Vector[Byte], val rng: RNG, val idx: Int =
       myNum = myNum << BitsInByte
       myNum += newParam(idx + i).toInt
     (myNum, ParametricRandom(newParam, newRng, idx + SizeOfInt))
-  // Mod gives close enough approximation for reasonably sized n
-  def nextInt(n: Int): (Int, RNG) = 
+  @tailrec
+  final def nextInt(n: Int): (Int, RNG) = 
     val (newInt, newRng) = this.nextInt()
-    val rangeCorrected = newInt % n
-    val signCorrected = if rangeCorrected >= 0 then rangeCorrected else rangeCorrected + n
-    (signCorrected, newRng)  
+    if (newInt <  Int.MaxValue - Int.MaxValue % n) then
+      val rangeCorrected = newInt % n
+      val signCorrected = if rangeCorrected >= 0 then rangeCorrected else rangeCorrected + n
+      (signCorrected, newRng)
+    else 
+      nextInt(n)
+
   def nextDouble(): (Double, RNG) = 
-    val (newInt, newRng) = this.nextInt(Int.MaxValue)
+    val (newInt, newRng) = this.nextInt()
     (newInt.toFloat / (Int.MaxValue + 1), newRng)
   def nextBool(): (Boolean, RNG) = 
     val (newParam, newRng) = if idx + SizeOfBool > parameter.size then 

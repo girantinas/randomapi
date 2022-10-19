@@ -30,6 +30,12 @@ object Gen:
       val (offset, rng2) = rng.nextInt(upper - lower + 1) 
       (lower + offset, rng2)
 
+  def nonNegativeInt: Gen[Int] = (rng: RNG) =>
+    val (i, r) = rng.nextInt()
+    (if i < 0 then -(i + 1) else i, r)
+
+  def int: Gen[Int] = _.nextInt()
+
   /* Generates a double uniformly between 0 and 1. */
   def double: Gen[Double] = (rng: RNG) => rng.nextDouble()
 
