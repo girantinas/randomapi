@@ -83,7 +83,7 @@ object Gen:
 
   def genOperator: Gen[Operator] = Gen.oneOf(Operator.values)
 
-    /**
+  /**
    * Generates a Boolean which has the given chance to be true.
    *
    *  - bernoulli(1.0) is always true
@@ -97,13 +97,19 @@ object Gen:
       x <- double
     } yield(x < prob)
 
+  /* Custom distros */
+  
+  def keepTrying[T](gen: Gen[Option[T]]): Gen[T] = ???
+
   /**
    * Generates Double values according to the given gaussian
    * distribution, specified by its mean and standard deviation.
    */
   def normal(mean: Double, stdDev: Double): Gen[Double] =
     // Box-Muller Algorithm
-    // @tailrec TODO
+    // @tailrec TODO: trampolining (tailRecM)
+    // def tailRecM[A, B](init: A)(fn: A => Gen[Either[A, B]]): Gen[B] =
+    // On left, continue looping and on right life the value
     def loop(x: Double, y: Double): Gen[Double] =
       val s = x * x + y * y
       if (s < 1.0 && s > 0.0) then {
@@ -152,7 +158,7 @@ object Gen:
    * the generator of a true test.
    */
   def binomial(test: Gen[Boolean], trials: Int): Gen[Int] =
-    // @tailrec TODO
+    // @tailrec
     def loop(trialsLeft: Int, successes: Int): Gen[Int] =
       if (trialsLeft == 0) then lift(successes)
       else test.map(if _ then 1 else 0).flatMap(i => loop(trialsLeft - 1, successes + i))

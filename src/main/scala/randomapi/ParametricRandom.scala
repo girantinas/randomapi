@@ -27,9 +27,13 @@ class ParametricRandom(val parameter: Vector[Byte], val rng: RNG, val idx: Int =
     else 
       nextInt(n)
 
+  def nextNonNegativeInt(): (Int, RNG) =
+    val (myInt, rng2) = this.nextInt()
+    (if (myInt < 0) then - (myInt + 1) else myInt, rng2)
+
   def nextDouble(): (Double, RNG) = 
-    val (newInt, newRng) = this.nextInt()
-    (newInt.toFloat / (Int.MaxValue + 1), newRng)
+    val (newInt, newRng) = this.nextNonNegativeInt()
+    (newInt / (Int.MaxValue.toDouble + 1), newRng)
   def nextBool(): (Boolean, RNG) = 
     val (newParam, newRng) = if idx + SizeOfBool > parameter.size then 
       val (newBytes, newRng) = rng.nextBytes(idx - parameter.size + SizeOfBool)
