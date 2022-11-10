@@ -1,5 +1,0 @@
-[0m[[0m[33mwarn[0m] [0m[0m[33m[33m-- Deprecation Warning: /Users/rohaga/Documents/Research/RandomAPI/src/main/scala/riscvgen/InstructionSequence.scala:32:32 [0m[0m[0m
-[0m[[0m[33mwarn[0m] [0m[0m[33m32 |[0m      sequenceType <- Gen.oneOf(InstructionSequenceType.values, biases = Some(InstructionSequenceBiases(depth)))[0m
-[0m[[0m[33mwarn[0m] [0m[0m[33m[33m   |[0m                                ^[0m[0m
-[0m[[0m[33mwarn[0m] [0m[0m[33m   |[0m[33mmethod[0m [35mcopyArrayToImmutableIndexedSeq[0m in [33mclass[0m [35mLowPriorityImplicits2[0m is deprecated since 2.13.0: Implicit conversions from Array to immutable.IndexedSeq are implemented by copying; Use the more efficient non-copying ArraySeq.unsafeWrapArray or an explicit toIndexedSeq call[0m
-[0m[[0m[33mwarn[0m] [0m[0mone warning found[0m

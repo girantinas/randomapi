@@ -4,3 +4,5 @@
 .vscode
 .bsp
 .bloop
+parser_scripts
+target
