@@ -1,1 +1,1 @@
-["randomapi.Gen$package"]
+["randomapi.Gen$package","riscvgen.GeneratorRuntime","riscvgen.InstructionSequence"]
