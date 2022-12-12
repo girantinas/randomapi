@@ -122,7 +122,7 @@ enum RiscvReg {
 }
 
 object RiscvReg {
-  extension [A] (self: RiscvReg) def toString(): String = self match
+  extension [A] (self: RiscvReg) def toAsmString(): String = self match
     case ZERO => "x0"
     case RA => "ra"
     case SP => "sp"

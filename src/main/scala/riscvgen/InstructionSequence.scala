@@ -2,6 +2,8 @@ package riscvgen
 import randomapi.Gen
 import randomapi.RNG
 import randomapi.ParametricRandom
+import java.nio.file.{Paths, Files, StandardOpenOption}
+import java.nio.charset.StandardCharsets
 
 enum InstructionSequenceType:
   case PrimitiveInstruction 
@@ -13,7 +15,7 @@ enum InstructionSequenceType:
 enum InstructionSequence:
    // PrimitiveInstruction: Wraps some Instruction type
   case PrimitiveInstruction(operator: RiscvOperator)
-  case ReadAfterWrite
+  case ReadAfterWrite(body: InstructionSequence)
   case ForLoop(body: InstructionSequence, count: Int)
   case WhileLoop(body: InstructionSequence, cond: RiscvBranch)
   // For now: assume everything is a basic block.
@@ -26,12 +28,16 @@ object InstructionSequence:
     val ProbPrimitive = depth.toDouble / MaxDepth
     val ProbNonPrimitive = (1 - depth.toDouble / MaxDepth) / (InstructionSequenceType.values.length - 1)
     Seq(ProbPrimitive) ++ Seq.fill(InstructionSequenceType.values.length - 1)(ProbNonPrimitive)}
+  val MinAddress: Long = 0x80000000
+  val AddressSpaceSize = 1000
 
   def gen(depth: Int = 0): Gen[InstructionSequence] = 
     for {
       sequenceType <- Gen.oneOf(InstructionSequenceType.values, biases = Some(InstructionSequenceBiases(depth)))
       sequence <- {sequenceType match
-        case InstructionSequenceType.ReadAfterWrite => Gen.lift(ReadAfterWrite)
+        case InstructionSequenceType.ReadAfterWrite => for {
+          body <- gen(depth + 1)
+        } yield (ReadAfterWrite(body))
 
         case InstructionSequenceType.ForLoop => for {
           count <- Gen.range(0, 100)
@@ -54,69 +60,80 @@ object InstructionSequence:
         } yield(BranchSequence(basicBlock1, basicBlock2, cond)) }
     } yield (sequence)
 
-  def genInstrsForSeq(instrseq: InstructionSequence, allowedRegs: Seq[RiscvReg] = RiscvReg.values.toIndexedSeq): Gen[Seq[String]] =
-    if (allowedRegs.length == 1) then Gen.lift(Seq.empty) else
+  def genInstrsForSeq(instrseq: InstructionSequence): Gen[Seq[String]] =
+    genInstrsForSeqHelper(instrseq, RiscvReg.values.toIndexedSeq, 0).map(p => p(0))
+
+  def genInstrsForSeqHelper(instrseq: InstructionSequence, allowedRegs: Seq[RiscvReg], labelIdx: Int): Gen[(Seq[String], Int)] =
+    if (allowedRegs.length == 1) then Gen.lift((Seq.empty, labelIdx)) else
     instrseq match  
-      case ReadAfterWrite =>
+      case ReadAfterWrite(body) =>
         for {
-          dest <- Gen.oneOf(allowedRegs).ensureNot(RiscvReg.ZERO)
+          dest <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs)
           src <- Gen.oneOf(allowedRegs)
-          base <- Gen.oneOf(allowedRegs).ensureNot(RiscvReg.ZERO).ensureNot(src)
-          locationMove <- RiscvOperator.ADDI.makeGen(rs1Gen=Gen.lift(RiscvReg.ZERO), rdGen=Gen.lift(base), immGen=Gen.range(0, 1000))
+          base <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs).ensureNot(src) // TODO: fix
+          locationMove <- RiscvOperator.LI.makeGen(rdGen=Gen.lift(base), immGen=Gen.range(0, AddressSpaceSize).map(MinAddress + _.toLong))
           store <- RiscvMem.SW.makeGen(rs1Gen=Gen.lift(base), rs2Gen=Gen.lift(src), immGen=Gen.lift(0))
-          // Am I supposed to put instructions here?
+          b <- genInstrsForSeqHelper(body, allowedRegs, labelIdx)
           load <- RiscvMem.LW.makeGen(rs1Gen=Gen.lift(base), rdGen=Gen.lift(dest), immGen=Gen.lift(0))
-      } yield (Seq(locationMove, store, load))
+      } yield ( (Seq(locationMove, store) ++ b(0) ++ Seq(load), b(1)) )
 
       case ForLoop(body, count) => 
         for {
           counterRegIdx <- Gen.range(0, allowedRegs.length)
           counterReg <- Gen.lift(allowedRegs(counterRegIdx))
           mov <- RiscvOperator.ADDI.makeGen(rs1Gen=Gen.lift(RiscvReg.ZERO), rdGen=Gen.lift(counterReg), immGen=Gen.lift(count))
-          b <- genInstrsForSeq(body, allowedRegs.patch(counterRegIdx, Nil, 1))
-          j <- RiscvJump.J.makeGen(immGen=Gen.lift(- 2 * b.length))
-          check <- RiscvBranch.BGE.makeGen(rs1Gen=Gen.lift(RiscvReg.ZERO), rs2Gen=Gen.lift(counterReg), immGen=Gen.lift(2 * (b.length + 1)))
-        } yield (Seq(check) ++ b ++ Seq(j))
+          b <- genInstrsForSeqHelper(body, allowedRegs.patch(counterRegIdx, Nil, 1), labelIdx + 1)
+          sub <- RiscvOperator.ADDI.makeGen(rs1Gen=Gen.lift(counterReg), rdGen=Gen.lift(counterReg), immGen=Gen.lift(-1))
+          j <- RiscvJump.J.makeGen(label=s"loop_$labelIdx")
+          check <- RiscvBranch.BGE.makeGen(rs1Gen=Gen.lift(RiscvReg.ZERO), rs2Gen=Gen.lift(counterReg), label=s"continue_$labelIdx")
+          forloop <- LABEL(s"loop_$labelIdx").makeGen()
+          continue <- LABEL(s"continue_$labelIdx").makeGen()
+        } yield ((Seq(forloop, check) ++ b(0) ++ Seq(sub, j, continue), b(1)))
 
       case WhileLoop(body, cond) =>
         for {
-          c <- cond.makeGen()
-          b <- genInstrsForSeq(body, allowedRegs)
-          j <- RiscvJump.JAL.makeGen(rdGen = Gen.lift(RiscvReg.ZERO), immGen = Gen.lift(- b.length * 2))
-        } yield(Seq(c) ++ b)
+          b <- genInstrsForSeqHelper(body, allowedRegs, labelIdx + 1)
+          c <- cond.makeGen(label=s"continue_$labelIdx")
+          whileloop <- LABEL(s"loop_$labelIdx").makeGen()
+          continue <- LABEL(s"continue_$labelIdx").makeGen()
+          j <- RiscvJump.J.makeGen(label=s"loop_$labelIdx")
+        } yield((Seq(whileloop, c) ++ b(0) ++ Seq(j, continue), b(1)))
 
       case PrimitiveInstruction(operator) => 
         for {
           instr <- operator.makeGen(rs1Gen = Gen.oneOf(allowedRegs), rs2Gen = Gen.oneOf(allowedRegs), rdGen = Gen.oneOf(allowedRegs))
-        } yield (Seq(instr))
+        } yield ((Seq(instr), labelIdx))
 
       case BranchSequence(basicBlock1, basicBlock2, cond) => 
         for {
-          bb1 <- genInstrsForSeq(basicBlock1, allowedRegs)
-          bb2 <- genInstrsForSeq(basicBlock2, allowedRegs)
-          c <- cond.makeGen(rs1Gen = Gen.oneOf(allowedRegs), rs2Gen = Gen.oneOf(allowedRegs), immGen = Gen.lift(bb1.length * 2))
-        } yield (Seq(c) ++ bb1 ++ bb2)
+          bb1 <- genInstrsForSeqHelper(basicBlock1, allowedRegs, labelIdx + 1)
+          bb2 <- genInstrsForSeqHelper(basicBlock2, allowedRegs, bb1(1))
+          j <- RiscvJump.J.makeGen(label=s"continue_$labelIdx")
+          c <- cond.makeGen(rs1Gen = Gen.oneOf(allowedRegs), rs2Gen = Gen.oneOf(allowedRegs), label=s"then_$labelIdx")
+          thenbranch <- LABEL(s"then_$labelIdx").makeGen()
+          continue <- LABEL(s"continue_$labelIdx").makeGen()
+        } yield ((Seq(c) ++ bb1(0) ++ Seq(j, thenbranch) ++ bb2(0) ++ Seq(continue), bb2(1)))
 
-  def generationTrial(random: RNG): Unit =
-    val nSeqs = 4
+  def generationTrial(i: Int): Unit =
+    val random = ParametricRandom.fromSeed(i)
+    println(s"\nRun $i")
+    println("-"*30)
+    val nSeqs = 5
     val sequenceGenerator = Gen.seqToGen(Seq.fill(nSeqs)(gen()))
-    // sequenceGenerator.generate(random).foreach(println(_))
-    val y = sequenceGenerator.generate(random)(0)
-    println(y)
-    val z = genInstrsForSeq(y).generate(random)
-    println(z)
     val instructions = 
       sequenceGenerator.flatMap(instrSequences => Gen.seqToGen(instrSequences.map(is => genInstrsForSeq(is))).map(_.flatten))
-    println("-"*30)
-    val instSeq = instructions.generate(random).foreach(println(_))
+    val instSeq = instructions.generate(random)
+
+    val prologue = "#include \"riscv_test.h\"\n#include \"test_macros.h\"\nRVTEST_RV64U\nRVTEST_CODE_BEGIN\n"
+    val epilogue = "RVTEST_PASS\nRVTEST_CODE_END\n.data\nRVTEST_DATA_BEGIN\nTEST_DATA\nRVTEST_DATA_END\n"
+    
+    Files.write(Paths.get(s"test_files/out$i.S"), 
+      (instSeq.foldLeft(prologue)((sofar, s) => sofar + s + '\n') + epilogue).getBytes(StandardCharsets.UTF_8),
+      StandardOpenOption.CREATE)
 
   def main(args: Array[String]): Unit =
     val is = List(2, 94, 6509, 347)
 
-    is.foreach { i =>
-      println(s"Run $i")
-      println("-"*30)
-      generationTrial(ParametricRandom.fromSeed(i))
-    }
+    is.foreach (generationTrial(_))
 
 
