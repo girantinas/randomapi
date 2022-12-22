@@ -43,10 +43,10 @@ sealed trait RiscvInstruction
 sealed trait PrimitiveRiscvInstruction extends RiscvInstruction
 
 object RiscvInstruction:
-  def immTypeGen(immType: ImmediateType): Gen[Int] =
+  def immTypeGen(immType: ImmediateType): Gen[Long] =
     immType match
-      case ImmediateType.IMM(n) => Gen.nBitSignedInt(n)
-      case ImmediateType.UIMM(n) => Gen.nBitUnsignedInt(n)
+      case ImmediateType.IMM(n) => Gen.nBitSignedInt(n).map(_.toLong)
+      case ImmediateType.UIMM(n) => Gen.nBitUnsignedInt(n).map(_.toLong)
 
   def nonzeroRiscvRegGen(allowedRegs: Seq[RiscvReg]): Gen[RiscvReg] = 
     if allowedRegs(0) == RiscvReg.ZERO 
@@ -57,12 +57,13 @@ object RiscvInstruction:
 enum RiscvOperator(hasRs1: Boolean,
                            hasRs2: Boolean,
                            hasRd: Boolean,
-                           hasImmediate: Boolean)
+                           hasImmediate: Boolean,
+                           immType: ImmediateType = ImmediateType.IMM(12))
                            (toString: (RiscvReg, RiscvReg, RiscvReg, Long) => String) extends RiscvInstruction:
   def makeGen(rs1Gen: Gen[RiscvReg] = Gen.oneOf(RiscvReg.values),
               rs2Gen: Gen[RiscvReg] = Gen.oneOf(RiscvReg.values),
               rdGen: Gen[RiscvReg] = Gen.oneOf(RiscvReg.values),
-              immGen: Gen[Long] = Gen.nBitSignedInt(12).map(_.toLong)): Gen[String] =
+              immGen: Gen[Long] = RiscvInstruction.immTypeGen(immType)): Gen[String] =
     for {
       rs1 <- if (hasRs1) then rs1Gen else Gen.lift(RiscvReg.ZERO)
       rs2 <- if (hasRs2) then rs2Gen else Gen.lift(RiscvReg.ZERO)
@@ -92,19 +93,19 @@ enum RiscvOperator(hasRs1: Boolean,
 
   // Arithmetic with Just Immediates
   case NOP extends RiscvOperator(false, false, false, false)((_, _, _, _) => "nop") with PrimitiveRiscvInstruction
-  case LUI extends RiscvOperator(true, false, true, true)((rs1, rs2, rd, imm) => s"lui ${rd.toAsmString()}, $imm") with PrimitiveRiscvInstruction
+  case LUI extends RiscvOperator(true, false, true, true, immType = ImmediateType.UIMM(20))((rs1, rs2, rd, imm) => s"lui ${rd.toAsmString()}, $imm") with PrimitiveRiscvInstruction
   case LI extends RiscvOperator(false, false, true, true)((rs1, rs2, rd, imm) => s"li ${rd.toAsmString()}, $imm") with PrimitiveRiscvInstruction
-  case AUIPC extends RiscvOperator(false, false, true, true)((rs1, rs2, rd, imm) => s"auipc ${rd.toAsmString()}, $imm") with PrimitiveRiscvInstruction
+  // case AUIPC extends RiscvOperator(false, false, true, true, immType = ImmediateType.UIMM(20))((rs1, rs2, rd, imm) => s"auipc ${rd.toAsmString()}, $imm") with PrimitiveRiscvInstruction
 
-enum RiscvJump(hasRs1: Boolean, hasOffset: Boolean)(toString: (RiscvReg, RiscvReg, Int, String) => String) extends RiscvInstruction:
+enum RiscvJump(hasRs1: Boolean, hasOffset: Boolean)(toString: (RiscvReg, RiscvReg, Long, String) => String) extends RiscvInstruction:
   def makeGen(rs1Gen: Gen[RiscvReg] = Gen.oneOf(RiscvReg.values),
               rdGen: Gen[RiscvReg] = Gen.oneOf(RiscvReg.values),
-              immGen: Gen[Int] = RiscvInstruction.immTypeGen(ImmediateType.IMM(12)),
+              immGen: Gen[Long] = RiscvInstruction.immTypeGen(ImmediateType.IMM(12)),
               label: String): Gen[String] =
     for {
       rs1 <- if (hasRs1) then rs1Gen else Gen.lift(RiscvReg.ZERO)
       rd <- rdGen
-      offset <- if (hasOffset) then immGen else Gen.lift(0)
+      offset <- if (hasOffset) then immGen else Gen.lift(0L)
     } yield (toString(rs1, rd, offset, label))
 
   case JALR extends RiscvJump(true, true)((rs1, rd, offset, _) => s"jalr ${rd.toAsmString()}, $offset(${rs1.toAsmString()})")
@@ -127,16 +128,16 @@ enum RiscvBranch(toString: (RiscvReg, RiscvReg, String) => String):
   case BLTU extends RiscvBranch((rs1, rs2, label) => s"bltu ${rs1.toAsmString()}, ${rs2.toAsmString()}, $label")
   case BGEU extends RiscvBranch((rs1, rs2, label) => s"bgeu ${rs1.toAsmString()}, ${rs2.toAsmString()}, $label")
 
-enum RiscvMem(hasRs1: Boolean, hasRs2: Boolean, hasRd: Boolean, hasImmediate: Boolean)(toString: (RiscvReg, RiscvReg, RiscvReg, Int) => String):
+enum RiscvMem(hasRs1: Boolean, hasRs2: Boolean, hasRd: Boolean, hasImmediate: Boolean)(toString: (RiscvReg, RiscvReg, RiscvReg, Long) => String):
   def makeGen(rs1Gen: Gen[RiscvReg] = Gen.oneOf(RiscvReg.values),
               rs2Gen: Gen[RiscvReg] = Gen.oneOf(RiscvReg.values),
               rdGen: Gen[RiscvReg] = Gen.oneOf(RiscvReg.values),
-              immGen: Gen[Int] = RiscvInstruction.immTypeGen(ImmediateType.IMM(12))): Gen[String] =     
+              immGen: Gen[Long] = RiscvInstruction.immTypeGen(ImmediateType.IMM(12))): Gen[String] =     
     for {
       rs1 <- if (hasRs1) then rs1Gen else Gen.lift(RiscvReg.ZERO)
       rs2 <- if (hasRs2) then rs2Gen else Gen.lift(RiscvReg.ZERO)
       rd <- if (hasRd) then rdGen else Gen.lift(RiscvReg.ZERO)
-      imm <- if (hasImmediate) then immGen else Gen.lift(0)
+      imm <- if (hasImmediate) then immGen else Gen.lift(0L)
     } yield (toString(rs1, rs2, rd, imm))
   
   case LW extends RiscvMem(true, false, true, true)((rs1, _, rd, offset) => s"lw ${rd.toAsmString()}, $offset(${rs1.toAsmString()})")

@@ -6,4 +6,12 @@
 .bloop
 parser_scripts
 target
-test_files
+project
+*.S
+*.riscv
+*.host
+*.o
+*.dump
+*.out
+*.hex
+*~
