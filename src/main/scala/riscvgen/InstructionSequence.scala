@@ -5,6 +5,7 @@ import randomapi.ParametricRandom
 import java.nio.file.{Paths, Files}
 import java.nio.charset.StandardCharsets
 import scala.sys.process.*
+import util.control.Breaks.*
 
 enum InstructionSequenceType:
   case PrimitiveInstruction 
@@ -137,6 +138,11 @@ object InstructionSequence:
   // Main Zest Loop
 
   def zestLoop(seeds: Seq[Int]): Unit =
+    val NumBoilerPlateAccesses = 1666
+    val NumBoilerPlateMisses = 1
+    val SpikeTimeout = 2000 // ms
+    val PollingFactor = 8
+
     val numIterations = 100
     val numMutationTrials = 5
     val numMutations = 6
@@ -149,7 +155,10 @@ object InstructionSequence:
     for (j <- 1 to numIterations) {
       println(s"Running outer iteration $j")
       var currRandoms: Seq[ParametricRandom] = Seq()
-      successRandoms.foreach { random =>
+      successRandoms.zipWithIndex.foreach { (random, randomIdx) =>
+        if (randomIdx % 10 == 0) {
+          println(s"$randomIdx/${successRandoms.length} seeds")
+        }
         val makeBuilder = StringBuilder("rv64ui_sc_tests = \\\n")
         var mutRandoms: Seq[ParametricRandom] = Seq()
         currRandoms = currRandoms :+ random // Recycle this random
@@ -157,7 +166,7 @@ object InstructionSequence:
         // Generation
         for (i <- 1 to numMutationTrials) {
           val mutRandom = random.mutate(numMutations)
-          makeRandomInstructions(mutRandom, i) // TODO: Add a fixed timeout
+          makeRandomInstructions(mutRandom, i)
           mutRandoms = mutRandoms :+ mutRandom
           makeBuilder.addAll(s"out$i \\\n")
         }
@@ -169,22 +178,46 @@ object InstructionSequence:
 
         // Running
         for (i <- 1 to numMutationTrials) {
-          println(s"Trying mutation $i")
-          try {
-            val spikeResult = s"spike -l --log=./logs/out$i.log --log-cache-miss --dc=32:1:64 ./test/rv64ui-p-out$i".!!(compileLog) // -l
-            val lines = spikeResult.split("\n")
-            if (lines(0).matches("Assertion failed.*")) {
-              failureRandoms = failureRandoms :+ mutRandoms(i - 1) // Maybe an invalid instead
-            } else {
-              val missRate = lines(lines.length - 1).split(":")(1).strip().stripSuffix("%").toDouble
-              topRandomMisses.sortInPlace()
-              if (missRate > topRandomMisses(0)) {
-                currRandoms = currRandoms :+ mutRandoms(i - 1)
-                topRandomMisses(0) = missRate
+          val spikeCmd = s"spike -l --log=./logs/out$i.log --dc=32:1:64 ./test/rv64ui-p-out$i"
+          var failedFlag = false
+          var successFlag = true
+          var lines: Seq[String] = Seq()
+          val spikeProcess = stringToProcess(spikeCmd).run(ProcessLogger(
+            spikeResult => {
+              lines = lines :+ spikeResult
+              if (lines.length == 8) {
+                if (lines(0).matches("Assertion failed.*")) {
+                  failureRandoms = failureRandoms :+ mutRandoms(i - 1) // Maybe an invalid instead
+                } else {
+                  val getStat = (idx: Int) => lines(idx).split(":")(1).strip().toInt
+                  val totalAccesses = getStat(2) + getStat(3) - NumBoilerPlateAccesses
+                  val totalMisses = getStat(4) + getStat(5) - NumBoilerPlateMisses
+                  // Miss Rate from spike is not correct because there are some accesses made by boilerplate
+                  val missRate = if totalAccesses == 0 then 0d else totalMisses.toDouble / totalAccesses
+                  topRandomMisses.sortInPlace()
+                  if (missRate > topRandomMisses(0)) {
+                    // if (missRate > 1.0) {
+                    //   println(s"Accesses: $totalAccesses, Misses: $totalMisses")
+                    // }
+                    currRandoms = currRandoms :+ mutRandoms(i - 1)
+                    topRandomMisses(0) = missRate
+                  }
+                }
+              }
+            },
+            _ => { if(!failedFlag) { 
+                failureRandoms = failureRandoms :+ mutRandoms(i - 1)
+                failedFlag = true
               }
             }
-          } catch {
-            case e: RuntimeException => failureRandoms = failureRandoms :+ mutRandoms(i - 1)
+          ))
+          breakable {
+            for (_ <- 1 to PollingFactor) {
+              Thread.sleep(SpikeTimeout / PollingFactor)
+              if !spikeProcess.isAlive() then break()
+            }
+            spikeProcess.destroy()
+            if spikeProcess.exitValue() != 0 && !failedFlag then failureRandoms = failureRandoms :+ mutRandoms(i - 1)
           }
         }
       }
