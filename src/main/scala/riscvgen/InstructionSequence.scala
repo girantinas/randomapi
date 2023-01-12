@@ -1,7 +1,5 @@
 package riscvgen
-import randomapi.Gen
-import randomapi.RNG
-import randomapi.ParametricRandom
+import randomapi.{Gen, RNG, ParametricRandom, ScalaRandom}
 import java.nio.file.{Paths, Files}
 import java.nio.charset.StandardCharsets
 import scala.sys.process.*
@@ -38,7 +36,7 @@ object InstructionSequence:
 
   def gen(depth: Int = 0): Gen[InstructionSequence] = 
     for {
-      sequenceType <- Gen.oneOf(InstructionSequenceType.values, biases = Some(InstructionSequenceBiases(depth)))
+      sequenceType <- Gen.oneOf(InstructionSequenceType.values.toIndexedSeq, biases = Some(InstructionSequenceBiases(depth)))
       sequence <- {sequenceType match
         case InstructionSequenceType.ReadAfterWrite => for {
           body <- gen(depth + 1)
@@ -178,6 +176,7 @@ object InstructionSequence:
 
         // Running
         for (i <- 1 to numMutationTrials) {
+          println("-------------------")
           val spikeCmd = s"spike -l --log=./logs/out$i.log --dc=32:1:64 ./test/rv64ui-p-out$i"
           var failedFlag = false
           var successFlag = true
@@ -196,16 +195,22 @@ object InstructionSequence:
                   val missRate = if totalAccesses == 0 then 0d else totalMisses.toDouble / totalAccesses
                   topRandomMisses.sortInPlace()
                   if (missRate > topRandomMisses(0)) {
-                    // if (missRate > 1.0) {
-                    //   println(s"Accesses: $totalAccesses, Misses: $totalMisses")
-                    // }
+                    if (missRate > 1.0) {
+                      println(s"Accesses: $totalAccesses, Misses: $totalMisses")
+                      println()
+                      println(lines.mkString("\n"))
+                    }
                     currRandoms = currRandoms :+ mutRandoms(i - 1)
                     topRandomMisses(0) = missRate
                   }
                 }
               }
             },
-            _ => { if(!failedFlag) { 
+            s => { 
+              println(s"ERROR: $s")
+              if(!failedFlag) { 
+                if (s.matches(".*668\\)")) { 
+                  Files.copy(Paths.get(s"test/rv64ui/out$i.s"), Paths.get(s"logs/erroredAss${failureRandoms.length}.s")) }
                 failureRandoms = failureRandoms :+ mutRandoms(i - 1)
                 failedFlag = true
               }
@@ -216,9 +221,9 @@ object InstructionSequence:
               Thread.sleep(SpikeTimeout / PollingFactor)
               if !spikeProcess.isAlive() then break()
             }
-            spikeProcess.destroy()
-            if spikeProcess.exitValue() != 0 && !failedFlag then failureRandoms = failureRandoms :+ mutRandoms(i - 1)
           }
+          spikeProcess.destroy()
+          if spikeProcess.exitValue() != 0 && !failedFlag then failureRandoms = failureRandoms :+ mutRandoms(i - 1)
         }
       }
       topRandomMisses.sortInPlace()
@@ -230,6 +235,3 @@ object InstructionSequence:
   def main(args: Array[String]): Unit =
     val seeds = List(2, 194, 6509, 347)
     zestLoop(seeds)
-
-
-

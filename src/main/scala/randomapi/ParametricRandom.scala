@@ -75,6 +75,6 @@ object ParametricRandom:
   val InitialNumParameter = 20
 
   def fromSeed(startSeed: Long): ParametricRandom =
-    val rand = new ScalaRandom(startSeed)
+    val rand = new PseudoRandom(startSeed)
     val (bytes, rng) = rand.nextBytes(InitialNumParameter)
     ParametricRandom(bytes, rng)

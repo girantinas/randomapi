@@ -2,8 +2,7 @@ package randomapi
 
 import scala.util.Random
 
-/* Fake functional RNG Class to query the Scala random. How to fix? Perhaps copy the generator every time? */
-/* Maintain state manually. */
+/* Fake functional RNG Class to query the Scala random. Warning, no referential transparency! */
 class ScalaRandom(val seed: Long) extends RNG:
   val random = Random(seed)
   def nextInt(n: Int): (Int, RNG) = (random.nextInt(n), this)
