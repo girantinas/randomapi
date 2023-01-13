@@ -45,46 +45,10 @@ enum RiscvInstrCategory {
   case AMO
 }
 
-enum RiscvInstrFormat {
-  case J_FORMAT
-  case U_FORMAT
-  case I_FORMAT
-  case B_FORMAT
-  case R_FORMAT
-  case S_FORMAT
-  case R4_FORMAT
-  // Compressed instruction format
-  case CI_FORMAT
-  case CB_FORMAT
-  case CJ_FORMAT
-  case CR_FORMAT
-  case CA_FORMAT
-  case CL_FORMAT
-  case CS_FORMAT
-  case CSS_FORMAT
-  case CIW_FORMAT
-  // Vector formats
-  case VSET_FORMAT
-  case VA_FORMAT
-  case VS2_FORMAT
-  case VL_FORMAT
-  case VS_FORMAT
-}
-
 enum ImmediateType {
   case IMM(n: Int) // Signed immediate
   case UIMM(n: Int) // Unsigned immediate
 }
-
-// Todo: deal with these
-type IMM12 = Int
-type IMM20 = Int
-type JIMM20 = Int
-type IMM12HI = Int
-type IMM12LO = Int
-type BIMM12HI = Int
-type BIMM12LO = Int
-
 
 enum RiscvReg {
   case ZERO
