@@ -33,14 +33,16 @@ object InstructionSequence:
     val ProbNonPrimitive = (1 - depth.toDouble / MaxDepth) / (InstructionSequenceType.values.length - 2)
     ProbPrimitive +: Seq.fill(InstructionSequenceType.values.length - 2)(ProbNonPrimitive) :+ 0d
     }
-  val MinAddress: BigInt = BigInt(0x80004000)
+  val MinAddressLong: Long = 0x80004000
+  val MinAddress: BigInt = BigInt(MinAddressLong)
   val AddressSpaceSize: Long = 1000
   val MaxAddress: BigInt = MinAddress + AddressSpaceSize
   val WordSize = 4
 
   extension (self: RegState) def isLegalAccess(reg: RiscvReg): Boolean = {
     val v = self.get(reg)
-    (v % WordSize == 0) && (v >= MinAddress) && (v <= MaxAddress)}
+    (v % WordSize == 0) && (v >= MinAddress) && (v <= MaxAddress)
+  }
 
   def gen(depth: Int = 0): Gen[InstructionSequence] = 
     for {
@@ -87,7 +89,7 @@ object InstructionSequence:
           base <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs).ensureNot(src)
 
           legal1 <- lift(regState.isLegalAccess(base))
-          imm <- if legal1 then lift(0.asInstanceOf[BigInt]) else Gen.range(0, (AddressSpaceSize / 4).toInt).map(BigInt(_) * 4 + MinAddress)
+          imm <- if legal1 then lift(BigInt(0)) else Gen.range(0, (AddressSpaceSize / 4).toInt).map(BigInt(_) * 4 + MinAddress)
           lMove1 <- if legal1 then lift("") else LI.makeGen(rdGen=lift(base), immGen=lift(imm))
           store <- SW.makeGen(rs1Gen=lift(base), rs2Gen=lift(src), immGen=lift(0))
           
@@ -100,20 +102,20 @@ object InstructionSequence:
           load <- LW.makeGen(rs1Gen=lift(base), rdGen=lift(dest), immGen=lift(0))
           // assume memory here was not changed
           newRegState <- lift(b(2).update(src, regState.get(base)))
-        } yield ((((if legal1 then Seq(lMove1) else Seq.empty[String]) 
+        } yield ((((if !legal1 then Seq(lMove1) else Seq.empty[String]) 
                     :+ store)
                     ++ b(0) 
-                    ++ (if legal2 then Seq(lMove2) else Seq.empty[String])) 
+                    ++ (if !legal2 then Seq(lMove2) else Seq.empty[String])) 
                     :+ load, b(1), newRegState)
 
       case ForLoop(body, count) => // Bug: RegState only captures the first iteration of the loop. Need some kind of list of vals?
         for {
           counterRegIdx <- Gen.range(1, allowedRegs.length)
           counterReg <- lift(allowedRegs(counterRegIdx))
-          mov <- ADDI.makeGen(rs1Gen=lift(RiscvReg.ZERO), rdGen=lift(counterReg), immGen=lift(count))
+          mov <- ADDI.makeGen(rs1Gen=lift(RiscvReg.ZERO), rdGen=lift(counterReg), immGen=lift(BigInt(count)))
           // Do not update register state since loop registers are not allowed anyways.
-          b <- genInstrsForSeqHelper(body, allowedRegs.patch(counterRegIdx, Nil, 1), regState, sequenceNumber, labelIdx + 1)
-          sub <- ADDI.makeGen(rs1Gen=lift(counterReg), rdGen=lift(counterReg), immGen=lift(-1))
+          b <- genInstrsForSeqHelper(body, allowedRegs.patch(counterRegIdx, Nil, 1), regState, sequenceNumber, labelIdx + 1) 
+          sub <- ADDI.makeGen(rs1Gen=lift(counterReg), rdGen=lift(counterReg), immGen=lift(BigInt(-1)))
           j <- J.makeGen(label=s"loop_${sequenceNumber}_$labelIdx")
           check <- BGE.makeGen(rs1Gen=lift(RiscvReg.ZERO), rs2Gen=lift(counterReg), label=s"continue_${sequenceNumber}_$labelIdx")
           forloop <- LABEL(s"loop_${sequenceNumber}_$labelIdx").makeGen()
