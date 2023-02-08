@@ -48,12 +48,11 @@ class ParametricRandom(val parameter: Vector[Byte], val rng: RNG, val idx: Int =
     (newParam.slice(idx, idx + n), ParametricRandom(newParam, newRng, idx + n))
   def reset(): RNG = ParametricRandom(parameter, rng)
 
-  // Mutates n bits (with replacement) of the parameter using the underlying non-parametric rng
-  // If you want to mutate a lot (more than O(sqrt(n)) things) then use without replacement
-  def mutate(n: Int): ParametricRandom =
+  // Mutates n bits (with replacement) of the parameter using an external RNG
+  def mutate(n: Int, externalRng: RNG): ParametricRandom =
     assert(n > 0, "The number of mutated bits must be positive.")
     assert(n <= parameter.length * 8, "The number of mutated bits must be less than the number of parameters.")
-    val (newRNG, places) = Seq.fill(n)(0).foldLeft((rng, List[Int]())){ 
+    val (newRNG, places) = Seq.fill(n)(0).foldLeft((externalRng, List[Int]())){ 
       (x, _) => 
         val (r, l) = x
         val (place, retR) = r.nextInt(parameter.length * 8)

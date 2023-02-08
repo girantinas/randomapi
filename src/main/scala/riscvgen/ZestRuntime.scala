@@ -3,7 +3,7 @@ package riscvgen
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import scala.sys.process.*
-import randomapi.{ParametricRandom, PseudoRandom, Gen}
+import randomapi.{ParametricRandom, PseudoRandom, ScalaRandom, Gen, RNG}
 import util.control.Breaks.*
 import java.nio.file.{Files, Paths, StandardCopyOption}
 import riscvgen.InstructionSequence
@@ -15,11 +15,12 @@ object ZestRuntime:
                              numMutationTrials: Int,
                              numMutations: Int,
                              numSeqs: Int,
-                             mutRandoms: ArrayBuffer[ParametricRandom]): Unit =
+                             mutRandoms: ArrayBuffer[ParametricRandom],
+                             mutRng: RNG): Unit =
     val makeBuilder = StringBuilder("rv64ui_sc_tests = \\\n")
     // Generation
     for (i <- 1 to numMutationTrials) {
-      val mutRandom = random.mutate(numMutations)
+      val mutRandom = random.mutate(numMutations, mutRng)
       val sequenceGenerator = Gen.seqToGen(Seq.fill(numSeqs)(InstructionSequence.gen()))
       val instructions = 
         sequenceGenerator.flatMap(
@@ -48,16 +49,26 @@ object ZestRuntime:
     val NumBoilerPlateInsts = 5079
     val SpikeTimeout = 2000 // ms
     val PollingFactor = 8
-    val ScalaSeed = 1000
+    val ScalaSeedNew = 1000
+    val ScalaSeedMut = 999
     val NumSequences = 2
 
-    val numIterations = 100
+    val numIterations = 50
     val numMutationTrials = 5
-    val numMutationSchedule = (currBest: Double) => if currBest < 0.2 then (30 * (0.2 - currBest) + 5).round else 5
+    // val numMutationSchedule = (currBest: Double, _: Int) => (if currBest < 0.2 then (30 * (0.2 - currBest) + 5).round else 5).toInt
+    // val numMutationSchedule = (currBest: Double, iterations: Int) => {
+    //   val iterFactor = (iterations / 10) * 0.1
+    //   if currBest < iterFactor then math.max((30 * (iterFactor - currBest) + 5).round, 0) else 5
+    // }.toInt
+    // Halfs every 10 iterations
+    val numMutationSchedule = (_: Double, iterations: Int) => (60 * math.pow(0.5, 0.1 * iterations)).toInt
     val topRandomMisses: Array[Double] = Array.fill(10)(0d)
     var successRandoms: ArrayBuffer[ParametricRandom] = seeds.map(i => ParametricRandom.fromSeed(i))
     val failureRandoms: ArrayBuffer[ParametricRandom] = ArrayBuffer()
-    val newSeedGen = Random(ScalaSeed)
+    val newSeedGen = Random(ScalaSeedNew)
+    val mutGen = ScalaRandom(ScalaSeedMut)
+
+    Files.write(Paths.get("./logs/misses.csv"), "".getBytes(), StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE)
     
     "mkdir -p logs".!!
     for (j <- 1 to numIterations) {
@@ -73,8 +84,8 @@ object ZestRuntime:
 
         val mutRandoms: ArrayBuffer[ParametricRandom] = ArrayBuffer()
         topRandomMisses.sortInPlace()
-        val numMutations = numMutationSchedule(topRandomMisses(topRandomMisses.length - 1)).toInt
-        makeRandomInstructions(random, numMutationTrials, numMutations, NumSequences, mutRandoms)
+        val numMutations = numMutationSchedule(topRandomMisses(topRandomMisses.length - 1), j)
+        makeRandomInstructions(random, numMutationTrials, numMutations, NumSequences, mutRandoms, mutGen)
 
         // Running
         for (i <- 1 to numMutationTrials) {
@@ -117,10 +128,12 @@ object ZestRuntime:
             val missPerInst = totalMisses.toDouble / (totalInsts)
             topRandomMisses.sortInPlace()
             if (missPerInst > topRandomMisses(0)) {
-              if (missPerInst >= 0.2) {
-                println(s"out$i is optimal")
-                println(s"Seed: ${mutRandoms(i - 1).rng.asInstanceOf[PseudoRandom].seed}")
-                sys.exit()
+              if (missPerInst >= 0.13 && Random().nextInt(20) < 1) {
+                Files.copy(Paths.get(s"test/rv64ui/out$i.s"), Paths.get(s"logs/opt$j,$randomIdx,$i.s"))
+              } else {
+                if (Random().nextInt(50) < 1) {
+                  Files.copy(Paths.get(s"test/rv64ui/out$i.s"), Paths.get(s"logs/inopt$j,$randomIdx,$i.s"))
+                }
               }
               currRandoms += mutRandoms(i - 1)
               topRandomMisses(0) = missPerInst
@@ -139,7 +152,7 @@ object ZestRuntime:
       println(s"The Best are ${topRandomMisses.toList}")
 
       val csvOutput = topRandomMisses.foldLeft("")((soFar, miss) => soFar + "," + miss.toString()) + "\n"
-      Files.write(Paths.get("./logs/misses.csv"), csvOutput.getBytes(), StandardOpenOption.APPEND, StandardOpenOption.CREATE)
+      Files.write(Paths.get("./logs/misses.csv"), csvOutput.getBytes(), StandardOpenOption.APPEND)
 
       println(s"Length of re-randomizing list: ${currRandoms.length}")
       successRandoms = currRandoms

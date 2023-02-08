@@ -1,6 +1,12 @@
 package riscvgen
 import randomapi.{Gen, RNG}
-
+import Gen.lift
+import RiscvMem.*
+import RiscvOperator.*
+import RiscvJump.*
+import RiscvBranch.*
+import riscvgen.{RiscvBranch, RiscvOperator, RiscvInstruction, RiscvMem, RiscvJump, LABEL}
+import RiscvInstruction.RegState
 
 enum InstructionSequenceType:
   case PrimitiveInstruction 
@@ -27,9 +33,14 @@ object InstructionSequence:
     val ProbNonPrimitive = (1 - depth.toDouble / MaxDepth) / (InstructionSequenceType.values.length - 2)
     ProbPrimitive +: Seq.fill(InstructionSequenceType.values.length - 2)(ProbNonPrimitive) :+ 0d
     }
-  val MinAddress: Long = 0x80004000
-  val AddressSpaceSize = 1000
+  val MinAddress: BigInt = BigInt(0x80004000)
+  val AddressSpaceSize: Long = 1000
+  val MaxAddress: BigInt = MinAddress + AddressSpaceSize
   val WordSize = 4
+
+  extension (self: RegState) def isLegalAccess(reg: RiscvReg): Boolean = {
+    val v = self.get(reg)
+    (v % WordSize == 0) && (v >= MinAddress) && (v <= MaxAddress)}
 
   def gen(depth: Int = 0): Gen[InstructionSequence] = 
     for {
@@ -61,55 +72,74 @@ object InstructionSequence:
     } yield (sequence)
 
   def genInstrsForSeq(instrseq: InstructionSequence, sequenceNumber: Int): Gen[Seq[String]] =
-    genInstrsForSeqHelper(instrseq, RiscvReg.values.toIndexedSeq, sequenceNumber, 1).map(p => p(0))
+    genInstrsForSeqHelper(instrseq, 
+                          RiscvReg.values.toIndexedSeq, 
+                          RegState(m = Map.from(RiscvReg.values.zip(List.fill(RiscvReg.values.length)(BigInt(0))))), 
+                          sequenceNumber, 1).map(p => p(0))
 
-  def genInstrsForSeqHelper(instrseq: InstructionSequence, allowedRegs: Seq[RiscvReg], sequenceNumber: Int, labelIdx: Int): Gen[(Seq[String], Int)] =
-    if (allowedRegs.length == 1) then Gen.lift((Seq.empty, labelIdx)) else
+  def genInstrsForSeqHelper(instrseq: InstructionSequence, allowedRegs: Seq[RiscvReg], regState: RegState, sequenceNumber: Int, labelIdx: Int): Gen[(Seq[String], Int, RegState)] =
+    if (allowedRegs.length == 1) then lift((Seq.empty, labelIdx, regState)) else
     instrseq match  
       case ReadAfterWrite(body) =>
         for {
           dest <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs)
           src <- Gen.oneOf(allowedRegs)
           base <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs).ensureNot(src)
-          locationMove <- RiscvOperator.LI.makeGen(rdGen=Gen.lift(base), immGen=Gen.range(0, AddressSpaceSize / 4).map(MinAddress + _.toLong * 4))
-          store <- RiscvMem.SW.makeGen(rs1Gen=Gen.lift(base), rs2Gen=Gen.lift(src), immGen=Gen.lift(0))
-          b <- genInstrsForSeqHelper(body, allowedRegs, sequenceNumber, labelIdx)
-          load <- RiscvMem.LW.makeGen(rs1Gen=Gen.lift(base), rdGen=Gen.lift(dest), immGen=Gen.lift(0))
-      } yield ( (Seq(locationMove, store) ++ b(0) ++ Seq(locationMove, load), b(1)) )
 
-      case ForLoop(body, count) => 
+          legal1 <- lift(regState.isLegalAccess(base))
+          imm <- if legal1 then lift(0.asInstanceOf[BigInt]) else Gen.range(0, (AddressSpaceSize / 4).toInt).map(BigInt(_) * 4 + MinAddress)
+          lMove1 <- if legal1 then lift("") else LI.makeGen(rdGen=lift(base), immGen=lift(imm))
+          store <- SW.makeGen(rs1Gen=lift(base), rs2Gen=lift(src), immGen=lift(0))
+          
+          newRegState <- lift(if legal1 then regState else regState.update(base, imm))
+          b <- genInstrsForSeqHelper(body, allowedRegs, newRegState, sequenceNumber, labelIdx)
+          legal2 <- lift(b(2).isLegalAccess(base))
+          lMove2 <- if legal2 then lift("") 
+            else if legal1 then LI.makeGen(rdGen=lift(base), immGen=lift(regState.get(base)))
+            else LI.makeGen(rdGen=lift(base), immGen=lift(imm))
+          load <- LW.makeGen(rs1Gen=lift(base), rdGen=lift(dest), immGen=lift(0))
+          // assume memory here was not changed
+          newRegState <- lift(b(2).update(src, regState.get(base)))
+        } yield ((((if legal1 then Seq(lMove1) else Seq.empty[String]) 
+                    :+ store)
+                    ++ b(0) 
+                    ++ (if legal2 then Seq(lMove2) else Seq.empty[String])) 
+                    :+ load, b(1), newRegState)
+
+      case ForLoop(body, count) => // Bug: RegState only captures the first iteration of the loop. Need some kind of list of vals?
         for {
           counterRegIdx <- Gen.range(1, allowedRegs.length)
-          counterReg <- Gen.lift(allowedRegs(counterRegIdx))
-          mov <- RiscvOperator.ADDI.makeGen(rs1Gen=Gen.lift(RiscvReg.ZERO), rdGen=Gen.lift(counterReg), immGen=Gen.lift(count))
-          b <- genInstrsForSeqHelper(body, allowedRegs.patch(counterRegIdx, Nil, 1), sequenceNumber, labelIdx + 1)
-          sub <- RiscvOperator.ADDI.makeGen(rs1Gen=Gen.lift(counterReg), rdGen=Gen.lift(counterReg), immGen=Gen.lift(-1))
-          j <- RiscvJump.J.makeGen(label=s"loop_${sequenceNumber}_$labelIdx")
-          check <- RiscvBranch.BGE.makeGen(rs1Gen=Gen.lift(RiscvReg.ZERO), rs2Gen=Gen.lift(counterReg), label=s"continue_${sequenceNumber}_$labelIdx")
+          counterReg <- lift(allowedRegs(counterRegIdx))
+          mov <- ADDI.makeGen(rs1Gen=lift(RiscvReg.ZERO), rdGen=lift(counterReg), immGen=lift(count))
+          // Do not update register state since loop registers are not allowed anyways.
+          b <- genInstrsForSeqHelper(body, allowedRegs.patch(counterRegIdx, Nil, 1), regState, sequenceNumber, labelIdx + 1)
+          sub <- ADDI.makeGen(rs1Gen=lift(counterReg), rdGen=lift(counterReg), immGen=lift(-1))
+          j <- J.makeGen(label=s"loop_${sequenceNumber}_$labelIdx")
+          check <- BGE.makeGen(rs1Gen=lift(RiscvReg.ZERO), rs2Gen=lift(counterReg), label=s"continue_${sequenceNumber}_$labelIdx")
           forloop <- LABEL(s"loop_${sequenceNumber}_$labelIdx").makeGen()
           continue <- LABEL(s"continue_${sequenceNumber}_$labelIdx").makeGen()
-        } yield ((Seq(mov, forloop, check) ++ b(0) ++ Seq(sub, j, continue), b(1)))
+        } yield (Seq(mov, forloop, check) ++ b(0) ++ Seq(sub, j, continue), b(1), b(2).update(counterReg, 0))
 
       case WhileLoop(body, cond) =>
         for {
-          b <- genInstrsForSeqHelper(body, allowedRegs, sequenceNumber, labelIdx + 1)
+          b <- genInstrsForSeqHelper(body, allowedRegs, regState, sequenceNumber, labelIdx + 1)
           c <- cond.makeGen(label=s"continue_${sequenceNumber}_$labelIdx")
           whileloop <- LABEL(s"while_${sequenceNumber}_$labelIdx").makeGen()
           continue <- LABEL(s"continue_${sequenceNumber}_$labelIdx").makeGen()
-          j <- RiscvJump.J.makeGen(label=s"while_${sequenceNumber}_$labelIdx")
-        } yield((Seq(whileloop, c) ++ b(0) ++ Seq(j, continue), b(1)))
+          j <- J.makeGen(label=s"while_${sequenceNumber}_$labelIdx")
+        } yield(Seq(whileloop, c) ++ b(0) ++ Seq(j, continue), b(1), b(2))
 
       case PrimitiveInstruction(operator) => 
         for {
-          instr <- operator.makeGen(rs1Gen = Gen.oneOf(allowedRegs), rs2Gen = Gen.oneOf(allowedRegs), rdGen = Gen.oneOf(allowedRegs))
-        } yield ((Seq(instr), labelIdx))
+          instr <- operator.makeGenAndState(rs1Gen = Gen.oneOf(allowedRegs), rs2Gen = Gen.oneOf(allowedRegs), rdGen = Gen.oneOf(allowedRegs), state = regState)
+        } yield (Seq(instr(0)), labelIdx, instr(1))
 
       case BranchSequence(basicBlock1, basicBlock2, cond) => 
         for {
-          bb1 <- genInstrsForSeqHelper(basicBlock1, allowedRegs, sequenceNumber, labelIdx + 1)
-          bb2 <- genInstrsForSeqHelper(basicBlock2, allowedRegs, sequenceNumber, bb1(1))
-          j <- RiscvJump.J.makeGen(label=s"continue_${sequenceNumber}_$labelIdx")
+          bb1 <- genInstrsForSeqHelper(basicBlock1, allowedRegs, regState, sequenceNumber, labelIdx + 1)
+          bb2 <- genInstrsForSeqHelper(basicBlock2, allowedRegs, bb1(2), sequenceNumber, bb1(1))
+          j <- J.makeGen(label=s"continue_${sequenceNumber}_$labelIdx")
           c <- cond.makeGen(rs1Gen = Gen.oneOf(allowedRegs), rs2Gen = Gen.oneOf(allowedRegs), label=s"then_${sequenceNumber}_$labelIdx")
           thenbranch <- LABEL(s"then_${sequenceNumber}_$labelIdx").makeGen()
           continue <- LABEL(s"continue_${sequenceNumber}_$labelIdx").makeGen()
-        } yield ((Seq(c) ++ bb1(0) ++ Seq(j, thenbranch) ++ bb2(0) ++ Seq(continue), bb2(1)))
+        } yield (Seq(c) ++ bb1(0) ++ Seq(j, thenbranch) ++ bb2(0) ++ Seq(continue), bb2(1), bb2(2))
