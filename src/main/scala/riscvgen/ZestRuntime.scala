@@ -7,34 +7,42 @@ import randomapi.{ParametricRandom, PseudoRandom, ScalaRandom, Gen, RNG}
 import util.control.Breaks.*
 import java.nio.file.{Files, Paths, StandardCopyOption}
 import riscvgen.InstructionSequence
+import riscvgen.DecisionType.*
 import java.nio.charset.StandardCharsets
 import java.nio.file.StandardOpenOption
 
 object ZestRuntime:
-  def makeRandomInstructions(random: ParametricRandom,
+  def makeRandomInstructions(random: ParametricRandom[DecisionType],
                              numMutationTrials: Int,
-                             numMutations: Int,
+                            //  numMutations: Int,
                              numSeqs: Int,
-                             mutRandoms: ArrayBuffer[ParametricRandom],
+                             markingProbs: Map[DecisionType, Double],
+                             mutRandoms: ArrayBuffer[ParametricRandom[DecisionType]],
                              mutRng: RNG): Unit =
     val makeBuilder = StringBuilder("rv64ui_sc_tests = \\\n")
     // Generation
-    for (i <- 1 to numMutationTrials) {
-      val mutRandom = random.mutate(numMutations, mutRng)
-      val sequenceGenerator = Gen.seqToGen(Seq.fill(numSeqs)(InstructionSequence.gen()))
-      val instructions = 
-        sequenceGenerator.flatMap(
+    // Generator
+    val generator = Gen.seqToGen(Seq.fill(numSeqs)(InstructionSequence.gen())).mark(DecisionType.Structure).flatMap(
           instrSequences => Gen.seqToGen(instrSequences.zipWithIndex.map((is, idx) => InstructionSequence.genInstrsForSeq(is, idx + 1)))
         )
+
+    // Fill in random's corr map.      
+    random.decorrelate()
+    val (_, fullRandom: ParametricRandom[DecisionType]) = generator.generateWithRNG(random): @unchecked
+
+    for (i <- 1 to numMutationTrials) {
+      // val mutRandom = random.mutate(numMutations, mutRng)
+      val mutRandom = fullRandom.mutate(markingProbs(_), mutRng)
       
-      val instSeq: Seq[String] = instructions.generate(random).flatten
+      val (instSeqs, fullMutRandom) = generator.generateWithRNG(mutRandom)
+      val instSeq: Seq[String] = instSeqs.flatten
 
       val prologue = "#include \"riscv_test.h\"\n#include \"test_macros.h\"\nRVTEST_RV64U\nRVTEST_CODE_BEGIN\n"
       val epilogue = "RVTEST_PASS\nRVTEST_CODE_END\n.data\nRVTEST_DATA_BEGIN\nTEST_DATA\nRVTEST_DATA_END\n"
       
       Files.write(Paths.get(s"test/rv64ui/out$i.S"), 
         (instSeq.foldLeft(prologue)((sofar, s) => sofar + s + '\n') + epilogue).getBytes(StandardCharsets.UTF_8))
-      mutRandoms += mutRandom
+      mutRandoms += fullMutRandom.asInstanceOf[ParametricRandom[DecisionType]]
       makeBuilder.addAll(s"out$i \\\n")
     }
 
@@ -43,7 +51,7 @@ object ZestRuntime:
     val makeResult = "make -C ./test".!(ProcessLogger(_ => (), _ => ()))
     if makeResult != 0 then throw Exception("Stimulus compilation failed")
 
-  def zestLoop(seeds: ArrayBuffer[Int]): Unit =
+  def zestLoop(seeds: ArrayBuffer[Int], markingProbs: Map[DecisionType, Double]): Double =
     val NumBoilerPlateAccesses = 1666
     val NumBoilerPlateMisses = 1
     val NumBoilerPlateInsts = 5079
@@ -53,8 +61,8 @@ object ZestRuntime:
     val ScalaSeedMut = 999
     val NumSequences = 2
 
-    val numIterations = 50
-    val numMutationTrials = 5
+    val numIterations = 20
+    val numMutationTrials = 4
     // val numMutationSchedule = (currBest: Double, _: Int) => (if currBest < 0.2 then (30 * (0.2 - currBest) + 5).round else 5).toInt
     // val numMutationSchedule = (currBest: Double, iterations: Int) => {
     //   val iterFactor = (iterations / 10) * 0.1
@@ -63,8 +71,8 @@ object ZestRuntime:
     // Halfs every 10 iterations
     val numMutationSchedule = (_: Double, iterations: Int) => (60 * math.pow(0.5, 0.1 * iterations)).toInt
     val topRandomMisses: Array[Double] = Array.fill(10)(0d)
-    var successRandoms: ArrayBuffer[ParametricRandom] = seeds.map(i => ParametricRandom.fromSeed(i))
-    val failureRandoms: ArrayBuffer[ParametricRandom] = ArrayBuffer()
+    var successRandoms: ArrayBuffer[ParametricRandom[DecisionType]] = seeds.map(i => ParametricRandom.fromSeed(i))
+    val failureRandoms: ArrayBuffer[ParametricRandom[DecisionType]] = ArrayBuffer()
     val newSeedGen = Random(ScalaSeedNew)
     val mutGen = ScalaRandom(ScalaSeedMut)
 
@@ -74,7 +82,7 @@ object ZestRuntime:
     for (j <- 1 to numIterations) {
       println(s"Running outer iteration $j")
 
-      val currRandoms: ArrayBuffer[ParametricRandom] = ArrayBuffer()
+      val currRandoms: ArrayBuffer[ParametricRandom[DecisionType]] = ArrayBuffer()
       for ((random, randomIdx) <- successRandoms.zipWithIndex) {
         if (randomIdx % 10 == successRandoms.length % 10) {
           println(s"$randomIdx/${successRandoms.length} seeds")
@@ -82,10 +90,10 @@ object ZestRuntime:
 
         val oldNumRandoms = currRandoms.length
 
-        val mutRandoms: ArrayBuffer[ParametricRandom] = ArrayBuffer()
+        val mutRandoms: ArrayBuffer[ParametricRandom[DecisionType]] = ArrayBuffer()
         topRandomMisses.sortInPlace()
         val numMutations = numMutationSchedule(topRandomMisses(topRandomMisses.length - 1), j)
-        makeRandomInstructions(random, numMutationTrials, numMutations, NumSequences, mutRandoms, mutGen)
+        makeRandomInstructions(random, numMutationTrials, NumSequences, markingProbs, mutRandoms, mutGen)
 
         // Running
         for (i <- 1 to numMutationTrials) {
@@ -114,7 +122,7 @@ object ZestRuntime:
           spikeProcess.destroy()
           
           if (spikeProcess.exitValue() != 0 && !failedFlag) {
-            println("ERROR: Timed out") 
+            println("ERROR: Timed out")
             failureRandoms += mutRandoms(i - 1)
             failedFlag = true
           } else if (lines.length > 0 && lines(0).matches("Assertion failed.*")) {
@@ -128,12 +136,13 @@ object ZestRuntime:
             val missPerInst = totalMisses.toDouble / (totalInsts)
             topRandomMisses.sortInPlace()
             if (missPerInst > topRandomMisses(0)) {
-              if (missPerInst >= 0.13 && Random().nextInt(20) < 1) {
-                Files.copy(Paths.get(s"test/rv64ui/out$i.s"), Paths.get(s"logs/opt$j,$randomIdx,$i.s"))
+              if (missPerInst >= 0.13) {
+                // Files.copy(Paths.get(s"test/rv64ui/out$i.s"), Paths.get(s"logs/opt$j,$randomIdx,$i.s"))
+                // Print out the correlation map:
               } else {
-                if (Random().nextInt(50) < 1) {
-                  Files.copy(Paths.get(s"test/rv64ui/out$i.s"), Paths.get(s"logs/inopt$j,$randomIdx,$i.s"))
-                }
+                // if (Random().nextInt(50) < 1) {
+                  // Files.copy(Paths.get(s"test/rv64ui/out$i.s"), Paths.get(s"logs/inopt$j,$randomIdx,$i.s"))
+                // }
               }
               currRandoms += mutRandoms(i - 1)
               topRandomMisses(0) = missPerInst
@@ -157,7 +166,30 @@ object ZestRuntime:
       println(s"Length of re-randomizing list: ${currRandoms.length}")
       successRandoms = currRandoms
     }
+    return topRandomMisses.max
 
   def main(args: Array[String]): Unit =
     val seeds = ArrayBuffer(2, 194, 6509, 347)
-    zestLoop(seeds)
+    val Steps = 5
+    val StepSize = 1.0/Steps
+    var best = Double.MinValue
+    var argBest = (0.0, 0.0, 0.0, 0.0)
+    for (p1 <- 0 to Steps by 1) {
+      for (p2 <- 0 to Steps by 1) {
+        for (p3 <- 0 to Steps by 1) {
+          for (p4 <- 0 to Steps by 1) {
+            val curr = zestLoop(seeds, Map((Immediate, p1 * StepSize),
+                                           (Instruction, p2 * StepSize),
+                                           (Register, p3 * StepSize),
+                                           (Structure, p4 * StepSize)))
+            Files.write(Paths.get("logs/bestLog.txt"), s"Probabilities ${(p1 * StepSize, p2 * StepSize, p3 * StepSize, p4 * StepSize)} achieve value $curr".getBytes(StandardCharsets.UTF_8))   
+            if (curr > best) {
+              best = curr
+              argBest = (p1 * StepSize, p2 * StepSize, p3 * StepSize, p4 * StepSize)
+            }
+          }
+        }
+      }
+    }
+    println(s"Best probabilities $argBest achieve value $best") 
+    Files.write(Paths.get("logs/finalLog.txt"), s"Best probabilities $argBest achieve value $best".getBytes(StandardCharsets.UTF_8))   

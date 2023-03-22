@@ -1,12 +1,14 @@
 package riscvgen
 import randomapi.{Gen, RNG}
-import Gen.lift
+import randomapi.Gen.*
 import RiscvMem.*
 import RiscvOperator.*
 import RiscvJump.*
 import RiscvBranch.*
 import riscvgen.{RiscvBranch, RiscvOperator, RiscvInstruction, RiscvMem, RiscvJump, LABEL}
 import RiscvInstruction.RegState
+
+import riscvgen.DecisionType.{Structure, Instruction, Immediate, Register}
 
 enum InstructionSequenceType:
   case PrimitiveInstruction 
@@ -84,12 +86,12 @@ object InstructionSequence:
     instrseq match  
       case ReadAfterWrite(body) =>
         for {
-          dest <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs)
-          src <- Gen.oneOf(allowedRegs)
-          base <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs).ensureNot(src)
+          dest <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs).mark(Register)
+          src <- Gen.oneOf(allowedRegs).mark(Register)
+          base <- RiscvInstruction.nonzeroRiscvRegGen(allowedRegs).ensureNot(src).mark(Register)
 
           legal1 <- lift(regState.isLegalAccess(base))
-          imm <- if legal1 then lift(BigInt(0)) else Gen.range(0, (AddressSpaceSize / 4).toInt).map(BigInt(_) * 4 + MinAddress)
+          imm <- if legal1 then lift(BigInt(0)) else Gen.range(0, (AddressSpaceSize / 4).toInt).map(BigInt(_) * 4 + MinAddress).mark(Immediate)
           lMove1 <- if legal1 then lift("") else LI.makeGen(rdGen=lift(base), immGen=lift(imm))
           store <- SW.makeGen(rs1Gen=lift(base), rs2Gen=lift(src), immGen=lift(0))
           
@@ -110,7 +112,7 @@ object InstructionSequence:
 
       case ForLoop(body, count) => // Bug: RegState only captures the first iteration of the loop. Need some kind of list of vals?
         for {
-          counterRegIdx <- Gen.range(1, allowedRegs.length)
+          counterRegIdx <- Gen.range(1, allowedRegs.length).mark(Immediate)
           counterReg <- lift(allowedRegs(counterRegIdx))
           mov <- ADDI.makeGen(rs1Gen=lift(RiscvReg.ZERO), rdGen=lift(counterReg), immGen=lift(BigInt(count)))
           // Do not update register state since loop registers are not allowed anyways.
@@ -133,7 +135,10 @@ object InstructionSequence:
 
       case PrimitiveInstruction(operator) => 
         for {
-          instr <- operator.makeGenAndState(rs1Gen = Gen.oneOf(allowedRegs), rs2Gen = Gen.oneOf(allowedRegs), rdGen = Gen.oneOf(allowedRegs), state = regState)
+          rs1 <- Gen.oneOf(allowedRegs).mark(Register)
+          rs2 <- Gen.oneOf(allowedRegs).mark(Register)
+          rd <- Gen.oneOf(allowedRegs).mark(Register)
+          instr <- operator.makeGenAndState(rs1Gen = Gen.lift(rs1), rs2Gen = Gen.lift(rs2), rdGen = Gen.lift(rd), state = regState)
         } yield (Seq(instr(0)), labelIdx, instr(1))
 
       case BranchSequence(basicBlock1, basicBlock2, cond) => 
@@ -141,7 +146,9 @@ object InstructionSequence:
           bb1 <- genInstrsForSeqHelper(basicBlock1, allowedRegs, regState, sequenceNumber, labelIdx + 1)
           bb2 <- genInstrsForSeqHelper(basicBlock2, allowedRegs, bb1(2), sequenceNumber, bb1(1))
           j <- J.makeGen(label=s"continue_${sequenceNumber}_$labelIdx")
-          c <- cond.makeGen(rs1Gen = Gen.oneOf(allowedRegs), rs2Gen = Gen.oneOf(allowedRegs), label=s"then_${sequenceNumber}_$labelIdx")
+          rs1 <- Gen.oneOf(allowedRegs).mark(Register)
+          rs2 <- Gen.oneOf(allowedRegs).mark(Register)
+          c <- cond.makeGen(rs1Gen = Gen.lift(rs1), rs2Gen = Gen.lift(rs2), label=s"then_${sequenceNumber}_$labelIdx")
           thenbranch <- LABEL(s"then_${sequenceNumber}_$labelIdx").makeGen()
           continue <- LABEL(s"continue_${sequenceNumber}_$labelIdx").makeGen()
         } yield (Seq(c) ++ bb1(0) ++ Seq(j, thenbranch) ++ bb2(0) ++ Seq(continue), bb2(1), bb2(2))

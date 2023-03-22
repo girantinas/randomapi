@@ -30,6 +30,7 @@ object RiscvInstruction:
       if v.testBit(NumBits - 1) then v - Modulo else v
     }
 
+// Todo: rewrite this to take in regular args instead of Gen[] args.
 enum RiscvOperator(hasRs1: Boolean, hasRs2: Boolean, hasRd: Boolean, hasImmediate: Boolean, immType: ImmediateType = ImmediateType.IMM(12))
                   (regUpdate: (RiscvReg, RiscvReg, RiscvReg, BigInt, RegState) => RegState)
                   (toString: (RiscvReg, RiscvReg, RiscvReg, BigInt) => String) extends RiscvInstruction:
