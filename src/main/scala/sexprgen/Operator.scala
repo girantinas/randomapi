@@ -13,7 +13,7 @@ enum Operator:
       case Mul => "*"
       case Div => "/"
 
-  def toFunction: (Int, Int) => Int =
+  def toFunction: (Long, Long) => Long =
     this match
       case Add => _ + _
       case Sub => _ - _

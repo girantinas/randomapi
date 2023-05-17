@@ -32,7 +32,7 @@ object RandomInstructor:
       val prologue = "#include \"riscv_test.h\"\n#include \"test_macros.h\"\nRVTEST_RV64U\nRVTEST_CODE_BEGIN\n"
       val epilogue = "RVTEST_PASS\nRVTEST_CODE_END\n.data\nRVTEST_DATA_BEGIN\nTEST_DATA\nRVTEST_DATA_END\n"
       
-      Files.write(Paths.get(s"test/rv64ui/out${i + numMutationTrials * randomIdx}.S"), 
+      Files.write(Paths.get(s"test/asm/out${i + numMutationTrials * randomIdx}.S"), 
         (instSeq.foldLeft(prologue)((sofar, s) => sofar + s + '\n') + epilogue).getBytes(StandardCharsets.UTF_8))
     }
 

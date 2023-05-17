@@ -6,25 +6,32 @@ enum SExpr:
   case Expression(operator: Operator, e1: SExpr, e2: SExpr)
   case Num(n: Int)
 
-  def evaluate: Option[Int] = 
+  def evaluate: Option[Long] = 
     this match
       case Num(n) => Some(n)
       case Expression(operator, e1, e2) => 
         try {
-          for 
+          (for {
             v1 <- e1.evaluate
             v2 <- e2.evaluate
-          yield(operator.toFunction(v1, v2))
+          } yield(operator.toFunction(v1, v2)))
         } catch {
           case e: ArithmeticException => None
         }
+    
+  def length: Int = // Hopefully should be not too expensive...
+    this match
+      case Num(n) => n.toString.length()
+      case Expression(operator, e1, e2) => 3 + e1.length + e2.length
+
   
   override def toString(): String =
     this match
       case Num(n) => n.toString()
       case Expression(operator, e1, e2) => ("(" ++ e1.toString ++ " " ++ operator.toString ++ " " ++ e2.toString ++ ")")
-  
-    /* Makes expressions iteratively. */
+
+object SExpr:
+  /* Makes expressions iteratively. */
   def genSExprSimple(operator: Gen[Operator], literal1: Gen[Int], literal2: Gen[Int]): Gen[SExpr] =
     for {
       op <- operator
@@ -33,20 +40,21 @@ enum SExpr:
     } yield SExpr.Expression(op, SExpr.Num(lit1), SExpr.Num(lit2))
   
   /* Makes expressions recursively. */
-  val max_depth = 10
-  val max_num = 20
+  val maxDepth = 10
+  val maxNum = 30
   def genSExprRec(depth: Int = 0): Gen[SExpr] =
-    Gen.double.flatMap { (rand: Double) =>
-      if (rand < 1 - depth.toDouble / max_depth) 
-      then for {
-        op <- genOperator
-        exp1 <- genSExprRec(depth + 1)
-        exp2 <- genSExprRec(depth + 1)
-      } yield (SExpr.Expression(op, exp1, exp2))
-      else for {
-        n <- Gen.range(0, max_num)
-      } yield (SExpr.Num(n))
-    }
+    for {
+      rand <- Gen.double.mark(DecisionType.Structure)
+      expr <- if (rand < 1 - depth.toDouble / maxDepth) 
+        then for {
+          op <- genOperator.mark(DecisionType.Operator)
+          exp1 <- genSExprRec(depth + 1)
+          exp2 <- genSExprRec(depth + 1)
+        } yield (SExpr.Expression(op, exp1, exp2))
+        else for {
+          n <- Gen.range(0, maxNum).mark(DecisionType.Number)
+        } yield (SExpr.Num(n))
+    } yield (expr)
 
   def genOperator: Gen[Operator] = Gen.oneOf(Operator.values)
   
@@ -75,14 +83,11 @@ enum SExpr:
 
   def main(args: Array[String]): Unit = 
     val is = List(2, 94, 6509, 347)
-    println("Generation with Scala Random:")
-    println("-"*30)
-    is.foreach { i =>
-      generationTrial(ScalaRandom(i))
-    }
+    
     println("\n\n")
     println("Generation with Parametric Random:")
     println("-"*30)
     is.foreach { i =>
       generationTrial(ParametricRandom.fromSeed(i))
     }
+  

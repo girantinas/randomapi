@@ -28,11 +28,11 @@ object Gen:
   extension [A](self: Gen[A]) def mark[B](label: B): Gen[A] = 
     (rng: RNG) => 
       val (value, rng2) = self(rng)
-      rng match {
+      rng2 match {
       case rng2: MarkRNG[B] =>
         val rng3 = rng2.correlate(label)
         (value, rng3)
-      case _ => { (value, rng2)}
+      case _ => { (value, rng2) }
     }
 
   extension [A](self: Gen[A]) def ensureNot(a: A): Gen[A] =

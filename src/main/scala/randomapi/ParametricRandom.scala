@@ -6,7 +6,7 @@ import scala.annotation.tailrec
 
 /* Functional Parametric Random class. */
 class ParametricRandom[A](private val par: Vector[Byte], private val corr: Vector[ParameterState[A]], val rng: RNG, val idx: Int = 0) extends MarkRNG[A](par, corr):
-  def nextInt(): (Int, RNG) = 
+  def nextInt(): (Int, ParametricRandom[A]) = 
     val (newParam, newCorr, newRng) = if idx + SizeOfInt > parameter.size then 
       // Double parameter size for amortization
       val (newBytes, newRng) = rng.nextBytes(parameter.size)
@@ -20,7 +20,7 @@ class ParametricRandom[A](private val par: Vector[Byte], private val corr: Vecto
     val newCorr2 = newCorr.slice(0, idx) ++ Vector.fill(SizeOfInt)(Unmarked()) ++ newCorr.slice(idx + SizeOfInt, newCorr.size)
     (myNum, ParametricRandom(newParam, newCorr2, newRng, idx + SizeOfInt))
   @tailrec
-  final def nextInt(n: Int): (Int, RNG) = 
+  final def nextInt(n: Int): (Int, ParametricRandom[A]) = 
     val (newInt, newRng) = this.nextInt()
     if (newInt <  Int.MaxValue - Int.MaxValue % n) then
       val rangeCorrected = newInt % n
@@ -29,20 +29,20 @@ class ParametricRandom[A](private val par: Vector[Byte], private val corr: Vecto
     else 
       nextInt(n)
 
-  def nextNonNegativeInt(): (Int, RNG) =
+  def nextNonNegativeInt(): (Int, ParametricRandom[A]) =
     val (myInt, rng2) = this.nextInt()
     (if (myInt < 0) then - (myInt + 1) else myInt, rng2)
 
-  def nextDouble(): (Double, RNG) = 
+  final def nextDouble(): (Double, ParametricRandom[A]) = 
     val (newInt, newRng) = this.nextNonNegativeInt()
-    (newInt / (Int.MaxValue.toDouble + 1), newRng)
-  def nextBool(): (Boolean, RNG) = 
+    (Math.min(newInt / (Int.MaxValue.toDouble + 1), 1), newRng)
+  final def nextBool(): (Boolean, RNG) = 
     val (newParam, newCorr, newRng) = if idx + SizeOfBool > parameter.size then 
       val (newBytes, newRng) = rng.nextBytes(idx - parameter.size + SizeOfBool)
       (parameter ++ newBytes, corr ++ Vector.fill(idx - parameter.size + SizeOfBool)(Unused()), newRng)
     else (parameter, corr, rng)
     (newParam(idx).toInt % 2 == 0, ParametricRandom(newParam, newCorr.updated(idx, Unmarked()), newRng, idx + SizeOfBool))
-  def nextBytes(n: Int): (Vector[Byte], RNG) =
+  final def nextBytes(n: Int): (Vector[Byte], RNG) =
     val (newParam, newCorr, newRng) = if idx + n > parameter.size then 
       val (newBytes, newRng) = rng.nextBytes(idx - parameter.size + n)
       (parameter ++ newBytes, corr ++ Vector.fill(idx - parameter.size + n)(Unused()), newRng)
@@ -87,7 +87,6 @@ class ParametricRandom[A](private val par: Vector[Byte], private val corr: Vecto
     ParametricRandom(newParam, Vector.fill(newParam.length)(Unused()), rng)
 
   def correlate(a: A): ParametricRandom[A] =
-    // TODO: fix bug
     ParametricRandom(parameter, corr.map(
       (o: ParameterState[A]) =>
       o match {
@@ -103,7 +102,7 @@ object ParametricRandom:
   val SizeOfBool = 1 // We take the whole byte for a Bool
   val SizeOfChar = 1
   val BitsInByte = 8
-  val InitialNumParameter = 20
+  val InitialNumParameter = 32
 
   def fromSeed[A](startSeed: Long): ParametricRandom[A] =
     val rand = new PseudoRandom(startSeed)
